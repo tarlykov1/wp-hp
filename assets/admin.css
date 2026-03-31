@@ -1,12 +1,56 @@
-.wch-admin-wrap .wch-controls {
-  display: flex;
-  align-items: center;
+.wch-admin-wrap .wch-controls-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(180px, 1fr));
   gap: 12px;
-  margin: 12px 0 16px;
+  margin: 12px 0;
 }
 
-.wch-admin-wrap .wch-controls label {
+.wch-admin-wrap .wch-controls-grid label {
+  display: block;
   font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.wch-admin-wrap .wch-controls-grid input,
+.wch-admin-wrap .wch-controls-grid select {
+  width: 100%;
+}
+
+.wch-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.wch-summary {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.wch-top-selectors {
+  margin: 0 0 10px;
+}
+
+.wch-top-selectors h2 {
+  font-size: 14px;
+  margin: 0 0 6px;
+}
+
+.wch-legend {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0;
+}
+
+.wch-legend-bar {
+  width: 180px;
+  height: 10px;
+  border-radius: 10px;
+  background: linear-gradient(90deg, #2b83ba 0%, #abdda4 25%, #ffffbf 50%, #fdae61 75%, #d7191c 100%);
 }
 
 .wch-preview-shell {
@@ -19,7 +63,7 @@
 
 #wch-preview {
   width: 100%;
-  height: 72vh;
+  height: 68vh;
   border: 0;
   display: block;
   background: #fff;
@@ -32,4 +76,48 @@
   width: 100%;
   height: 100%;
   pointer-events: none;
+}
+
+.wch-click-dot {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  margin-left: -4px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: rgba(215, 25, 28, 0.75);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.8);
+}
+
+#wch-status.is-error {
+  color: #b32d2e;
+}
+
+#wch-status.is-success {
+  color: #1d7f2c;
+}
+
+@media (max-width: 960px) {
+  .wch-admin-wrap .wch-controls-grid {
+    grid-template-columns: repeat(2, minmax(160px, 1fr));
+  }
+
+  #wch-preview {
+    height: 60vh;
+  }
+}
+
+@media (max-width: 600px) {
+  .wch-admin-wrap .wch-controls-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .wch-buttons {
+    flex-wrap: wrap;
+  }
+
+  .wch-summary {
+    flex-direction: column;
+    gap: 6px;
+  }
 }

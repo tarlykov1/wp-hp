@@ -5,6 +5,9 @@
     return;
   }
 
+  var lastTouch = null;
+  var recentlySent = {};
+
   function getDeviceType() {
     var ua = (navigator.userAgent || '').toLowerCase();
     if (ua.indexOf('ipad') !== -1 || ua.indexOf('tablet') !== -1) return 'tablet';
@@ -18,7 +21,62 @@
     return v;
   }
 
-  function sendPoint(clientX, clientY) {
+  function cssEscapeSimple(str) {
+    return (str || '').replace(/[^a-zA-Z0-9_-]/g, '');
+  }
+
+  function detectSelector(target) {
+    if (!target || !target.tagName) return null;
+
+    var chunks = [];
+    var node = target;
+    var depth = 0;
+
+    while (node && node.tagName && depth < 3) {
+      var part = node.tagName.toLowerCase();
+      if (node.id) {
+        part += '#' + cssEscapeSimple(node.id);
+        chunks.unshift(part);
+        break;
+      }
+
+      var className = (node.className && typeof node.className === 'string') ? node.className.split(/\s+/)[0] : '';
+      if (className) part += '.' + cssEscapeSimple(className);
+
+      chunks.unshift(part);
+      node = node.parentElement;
+      depth++;
+    }
+
+    var selector = chunks.join(' > ');
+    return selector ? selector.slice(0, 255) : null;
+  }
+
+  function shouldTrack() {
+    if (!window.wchTracker.requireConsent) return true;
+    return !!window.wchConsentGranted;
+  }
+
+  function makeEventId(type, x, y) {
+    var bucket = Math.round(Date.now() / 250);
+    return [type, bucket, Math.round(x), Math.round(y), window.wchTracker.path || '/'].join(':');
+  }
+
+  function isDuplicateClientSide(eventId) {
+    var now = Date.now();
+    var found = recentlySent[eventId];
+    recentlySent[eventId] = now;
+
+    Object.keys(recentlySent).forEach(function (key) {
+      if (now - recentlySent[key] > 3000) delete recentlySent[key];
+    });
+
+    return !!found;
+  }
+
+  function sendPoint(clientX, clientY, target, eventType) {
+    if (!shouldTrack()) return;
+
     var viewportW = window.innerWidth || document.documentElement.clientWidth || 1;
     var viewportH = window.innerHeight || document.documentElement.clientHeight || 1;
     var doc = document.documentElement;
@@ -27,6 +85,9 @@
 
     var xRatio = clamp01(clientX / viewportW);
     var yRatio = clamp01((clientY + (window.scrollY || window.pageYOffset || 0)) / docH);
+
+    var eventId = makeEventId(eventType, clientX, clientY);
+    if (isDuplicateClientSide(eventId)) return;
 
     var payload = {
       path: window.wchTracker.path || '/',
@@ -37,7 +98,10 @@
       viewport_h: viewportH,
       doc_w: docW,
       doc_h: docH,
-      device_type: getDeviceType()
+      device_type: getDeviceType(),
+      target_selector: detectSelector(target),
+      event_id: eventId,
+      consent: shouldTrack()
     };
 
     fetch(window.wchTracker.restUrl, {
@@ -54,12 +118,21 @@
 
   document.addEventListener('click', function (event) {
     if (!event || typeof event.clientX !== 'number') return;
-    sendPoint(event.clientX, event.clientY);
+
+    if (lastTouch) {
+      var dt = Date.now() - lastTouch.time;
+      var dx = Math.abs(lastTouch.x - event.clientX);
+      var dy = Math.abs(lastTouch.y - event.clientY);
+      if (dt < 700 && dx < 20 && dy < 20) return;
+    }
+
+    sendPoint(event.clientX, event.clientY, event.target, 'click');
   }, { passive: true });
 
   document.addEventListener('touchend', function (event) {
     if (!event.changedTouches || !event.changedTouches.length) return;
     var touch = event.changedTouches[0];
-    sendPoint(touch.clientX, touch.clientY);
+    lastTouch = { x: touch.clientX, y: touch.clientY, time: Date.now() };
+    sendPoint(touch.clientX, touch.clientY, event.target, 'touch');
   }, { passive: true });
 })();
