@@ -14,6 +14,8 @@ if (!defined('ABSPATH')) {
 }
 
 define('WCH_PLUGIN_VERSION', '1.1.0');
+define('WCH_DB_SCHEMA_VERSION', '2');
+define('WCH_TOP_SELECTORS_LIMIT', 15);
 define('WCH_PLUGIN_FILE', __FILE__);
 define('WCH_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('WCH_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -34,6 +36,39 @@ function wch_get_options(): array
 /**
  * Create plugin DB table and schedule cleanup.
  */
+function wch_maybe_migrate_schema(bool $force = false): void
+{
+    global $wpdb;
+
+    $schema_version = (string) get_option('wch_db_schema_version', '0');
+    if (!$force && version_compare($schema_version, WCH_DB_SCHEMA_VERSION, '>=')) {
+        return;
+    }
+
+    $table_name = $wpdb->prefix . 'wch_clicks';
+
+    $table_exists = (string) $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table_name));
+    if ($table_exists !== $table_name) {
+        update_option('wch_db_schema_version', WCH_DB_SCHEMA_VERSION, false);
+        return;
+    }
+
+    $column_exists = (string) $wpdb->get_var($wpdb->prepare(
+        'SHOW COLUMNS FROM ' . $table_name . ' LIKE %s',
+        'target_selector'
+    ));
+    if ($column_exists !== 'target_selector') {
+        $wpdb->query('ALTER TABLE ' . $table_name . ' ADD COLUMN target_selector VARCHAR(255) NULL AFTER device_type');
+    }
+
+    $index_exists = (string) $wpdb->get_var('SHOW INDEX FROM ' . $table_name . " WHERE Key_name = 'page_key_created_at'");
+    if ($index_exists === '') {
+        $wpdb->query('ALTER TABLE ' . $table_name . ' ADD INDEX page_key_created_at (page_key, created_at)');
+    }
+
+    update_option('wch_db_schema_version', WCH_DB_SCHEMA_VERSION, false);
+}
+
 function wch_activate(): void
 {
     global $wpdb;
@@ -72,6 +107,8 @@ function wch_activate(): void
     add_option('wch_retention_days', 180);
     add_option('wch_ignore_query_string', 1);
 
+    wch_maybe_migrate_schema(true);
+
     if (!wp_next_scheduled('wch_cleanup_cron')) {
         wp_schedule_event(time() + HOUR_IN_SECONDS, 'daily', 'wch_cleanup_cron');
     }
@@ -80,12 +117,11 @@ register_activation_hook(__FILE__, 'wch_activate');
 
 function wch_deactivate(): void
 {
-    $timestamp = wp_next_scheduled('wch_cleanup_cron');
-    if ($timestamp) {
-        wp_unschedule_event($timestamp, 'wch_cleanup_cron');
-    }
+    wp_clear_scheduled_hook('wch_cleanup_cron');
 }
 register_deactivation_hook(__FILE__, 'wch_deactivate');
+
+add_action('plugins_loaded', 'wch_maybe_migrate_schema');
 
 /**
  * Add admin menu page.
@@ -410,6 +446,31 @@ function wch_is_duplicate_event(string $event_id): bool
     return false;
 }
 
+
+function wch_normalize_selector(?string $selector): ?string
+{
+    if (!is_string($selector) || $selector === '') {
+        return null;
+    }
+
+    $selector = wp_strip_all_tags($selector);
+    $selector = preg_replace('/\s+/', ' ', $selector) ?? '';
+    $selector = trim($selector);
+
+    if ($selector === '') {
+        return null;
+    }
+
+    $selector = preg_replace("/[^a-zA-Z0-9_\\-\\.#:\\[\\]=\"'\\s>+~\\(\\),]/", '', $selector) ?? '';
+    $selector = trim($selector);
+
+    if ($selector === '') {
+        return null;
+    }
+
+    return substr($selector, 0, 255);
+}
+
 /**
  * Save click via REST API.
  */
@@ -470,12 +531,7 @@ function wch_rest_collect_click(WP_REST_Request $request): WP_REST_Response
     $doc_w      = absint($request->get_param('doc_w'));
     $doc_h      = absint($request->get_param('doc_h'));
 
-    $target_selector = sanitize_text_field((string) $request->get_param('target_selector'));
-    if ($target_selector !== '') {
-        $target_selector = substr($target_selector, 0, 255);
-    } else {
-        $target_selector = null;
-    }
+    $target_selector = wch_normalize_selector($request->get_param('target_selector'));
 
     $device_type = sanitize_key((string) $request->get_param('device_type'));
     $allowed_device_types = ['desktop', 'mobile', 'tablet', 'unknown'];
@@ -541,7 +597,23 @@ function wch_rest_get_heatmap(WP_REST_Request $request): WP_REST_Response
 {
     global $wpdb;
 
-    $path = wch_normalize_path((string) $request->get_param('path'));
+    $raw_path = (string) $request->get_param('path');
+    if (trim($raw_path) === '') {
+        return new WP_REST_Response([
+            'path' => '/',
+            'mode' => 'heatmap',
+            'items' => [],
+            'summary' => [
+                'total_clicks' => 0,
+                'unique_buckets' => 0,
+                'hottest_zones_count' => 0,
+            ],
+            'top_selectors' => [],
+            'empty' => true,
+        ]);
+    }
+
+    $path = wch_normalize_path($raw_path);
     $device_type = sanitize_key((string) $request->get_param('device_type'));
     $date_from = wch_parse_date(sanitize_text_field((string) $request->get_param('date_from')));
     $date_to = wch_parse_date(sanitize_text_field((string) $request->get_param('date_to')), true);
@@ -567,6 +639,8 @@ function wch_rest_get_heatmap(WP_REST_Request $request): WP_REST_Response
         $params[] = $date_to;
     }
 
+    $base_params = $params;
+
     if ($mode === 'click-points') {
         $sql = "
             SELECT
@@ -574,7 +648,7 @@ function wch_rest_get_heatmap(WP_REST_Request $request): WP_REST_Response
                 y_ratio,
                 target_selector,
                 created_at
-            FROM " . WCH_TABLE . "
+            FROM " . WCH_TABLE . " FORCE INDEX (page_key_created_at)
             {$where}
             ORDER BY id DESC
             LIMIT 5000
@@ -585,7 +659,7 @@ function wch_rest_get_heatmap(WP_REST_Request $request): WP_REST_Response
                 ROUND(x_ratio, 3) AS x_ratio,
                 ROUND(y_ratio, 3) AS y_ratio,
                 COUNT(*) AS weight
-            FROM " . WCH_TABLE . "
+            FROM " . WCH_TABLE . " FORCE INDEX (page_key_created_at)
             {$where}
             GROUP BY ROUND(x_ratio, 3), ROUND(y_ratio, 3)
             HAVING COUNT(*) >= %d
@@ -622,35 +696,35 @@ function wch_rest_get_heatmap(WP_REST_Request $request): WP_REST_Response
         SELECT
             COUNT(*) AS total_clicks,
             COUNT(DISTINCT CONCAT(ROUND(x_ratio, 3), ':', ROUND(y_ratio, 3))) AS unique_buckets
-        FROM " . WCH_TABLE . "
+        FROM " . WCH_TABLE . " FORCE INDEX (page_key_created_at)
         {$where}
     ";
-    $summary_prepared = $wpdb->prepare($summary_sql, array_slice($params, 0, count($params) - ($mode === 'heatmap' ? 1 : 0)));
+    $summary_prepared = $wpdb->prepare($summary_sql, $base_params);
     $summary = $wpdb->get_row($summary_prepared, ARRAY_A);
 
     $hot_sql = "
         SELECT COUNT(*) FROM (
             SELECT 1
-            FROM " . WCH_TABLE . "
+            FROM " . WCH_TABLE . " FORCE INDEX (page_key_created_at)
             {$where}
             GROUP BY ROUND(x_ratio, 3), ROUND(y_ratio, 3)
             HAVING COUNT(*) >= 5
         ) h
     ";
-    $hot_prepared = $wpdb->prepare($hot_sql, array_slice($params, 0, count($params) - ($mode === 'heatmap' ? 1 : 0)));
+    $hot_prepared = $wpdb->prepare($hot_sql, $base_params);
     $hottest_zones_count = (int) $wpdb->get_var($hot_prepared);
 
     $selectors_sql = "
         SELECT target_selector, COUNT(*) AS clicks
-        FROM " . WCH_TABLE . "
+        FROM " . WCH_TABLE . " FORCE INDEX (page_key_created_at)
         {$where}
         AND target_selector IS NOT NULL
         AND target_selector <> ''
         GROUP BY target_selector
         ORDER BY clicks DESC
-        LIMIT 10
+        LIMIT " . (int) WCH_TOP_SELECTORS_LIMIT . "
     ";
-    $selectors_prepared = $wpdb->prepare($selectors_sql, array_slice($params, 0, count($params) - ($mode === 'heatmap' ? 1 : 0)));
+    $selectors_prepared = $wpdb->prepare($selectors_sql, $base_params);
     $selectors_rows = $wpdb->get_results($selectors_prepared, ARRAY_A);
 
     return new WP_REST_Response([
@@ -668,6 +742,7 @@ function wch_rest_get_heatmap(WP_REST_Request $request): WP_REST_Response
                 'clicks' => (int) $row['clicks'],
             ];
         }, $selectors_rows ?: []),
+        'empty' => empty($items),
     ]);
 }
 
@@ -773,6 +848,7 @@ function wch_render_admin_page(): void
         <div class="wch-preview-shell">
             <iframe id="wch-preview" src="about:blank" title="Page preview"></iframe>
             <div id="wch-heatmap-layer" aria-hidden="true"></div>
+            <div id="wch-preview-notice" class="wch-preview-notice" hidden></div>
         </div>
 
         <p id="wch-status" class="description"></p>
@@ -835,5 +911,6 @@ function wch_uninstall(): void
     delete_option('wch_require_consent');
     delete_option('wch_retention_days');
     delete_option('wch_ignore_query_string');
+    delete_option('wch_db_schema_version');
 }
 register_uninstall_hook(__FILE__, 'wch_uninstall');

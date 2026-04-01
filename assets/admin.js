@@ -20,8 +20,10 @@
   var uniqueBucketsEl = document.getElementById('wch-unique-buckets');
   var hotZonesEl = document.getElementById('wch-hot-zones');
   var topSelectorsList = document.getElementById('wch-top-selectors-list');
+  var previewNotice = document.getElementById('wch-preview-notice');
 
   var heatmapInstance = null;
+  var iframeLoadTimer = null;
 
   function normalizePath(path) {
     var value = (path || '').trim();
@@ -35,6 +37,13 @@
   function setStatus(text, type) {
     statusEl.textContent = text;
     statusEl.className = 'description ' + (type || '');
+  }
+
+  function setPreviewNotice(text, type) {
+    if (!previewNotice) return;
+    previewNotice.textContent = text || '';
+    previewNotice.className = 'wch-preview-notice ' + (type || '');
+    previewNotice.hidden = !text;
   }
 
   function toggleLoading(on) {
@@ -115,7 +124,17 @@
     hotZonesEl.textContent = String((summary && summary.hottest_zones_count) || 0);
 
     topSelectorsList.innerHTML = '';
-    (selectors || []).forEach(function (item) {
+    var safeSelectors = Array.isArray(selectors) ? selectors : [];
+
+    if (!safeSelectors.length) {
+      var emptyLi = document.createElement('li');
+      emptyLi.textContent = 'Нет данных';
+      emptyLi.className = 'wch-empty-state';
+      topSelectorsList.appendChild(emptyLi);
+      return;
+    }
+
+    safeSelectors.forEach(function (item) {
       var li = document.createElement('li');
       li.textContent = item.selector + ' (' + item.clicks + ')';
       topSelectorsList.appendChild(li);
@@ -150,7 +169,12 @@
   function loadData() {
     var path = normalizePath(pathInput.value);
     pathInput.value = path;
+    setPreviewNotice('');
+    if (iframeLoadTimer) clearTimeout(iframeLoadTimer);
     iframe.src = buildPreviewUrl(path);
+    iframeLoadTimer = window.setTimeout(function () {
+      setPreviewNotice('Предпросмотр страницы не загрузился. Возможна блокировка X-Frame-Options/CSP.', 'is-warning');
+    }, 5000);
 
     toggleLoading(true);
     setStatus('Загрузка данных…');
@@ -170,14 +194,19 @@
         var items = Array.isArray(data.items) ? data.items : [];
         var mode = data.mode || 'heatmap';
 
-        if (mode === 'click-points') {
-          drawClickPoints(items);
+        if (!items.length) {
+          clearLayer();
+          setStatus('Нет данных для выбранных фильтров.', 'is-warning');
         } else {
-          drawHeatmap(items);
+          if (mode === 'click-points') {
+            drawClickPoints(items);
+          } else {
+            drawHeatmap(items);
+          }
+          setStatus('Загружено точек: ' + items.length, 'is-success');
         }
 
         updateSummary(data.summary || {}, data.top_selectors || []);
-        setStatus('Загружено точек: ' + items.length, 'is-success');
       })
       .catch(function (err) {
         setStatus('Не удалось загрузить данные: ' + err.message, 'is-error');
@@ -204,8 +233,20 @@
   resetBtn.addEventListener('click', resetFilters);
 
   iframe.addEventListener('load', function () {
+    if (iframeLoadTimer) clearTimeout(iframeLoadTimer);
     var rect = iframe.getBoundingClientRect();
     layer.style.width = rect.width + 'px';
     layer.style.height = rect.height + 'px';
+
+    try {
+      var doc = iframe.contentDocument;
+      if (!doc || !doc.body) {
+        setPreviewNotice('Предпросмотр недоступен. Проверьте X-Frame-Options/CSP на странице.', 'is-warning');
+      } else {
+        setPreviewNotice('');
+      }
+    } catch (e) {
+      setPreviewNotice('Предпросмотр недоступен из-за ограничений встраивания (X-Frame-Options/CSP).', 'is-warning');
+    }
   });
 })();

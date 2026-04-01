@@ -97,6 +97,28 @@
   color: #1d7f2c;
 }
 
+#wch-status.is-warning {
+  color: #996800;
+}
+
+.wch-preview-notice {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: rgba(255, 244, 229, 0.95);
+  border: 1px solid #dba617;
+  color: #7a4b00;
+  font-size: 12px;
+}
+
+.wch-empty-state {
+  color: #646970;
+  font-style: italic;
+}
+
 @media (max-width: 960px) {
   .wch-admin-wrap .wch-controls-grid {
     grid-template-columns: repeat(2, minmax(160px, 1fr));
