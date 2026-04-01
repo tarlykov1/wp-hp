@@ -25,8 +25,35 @@
     return (str || '').replace(/[^a-zA-Z0-9_-]/g, '');
   }
 
+  function normalizeSelector(selector) {
+    if (!selector) return null;
+    var normalized = String(selector).replace(/\s+/g, ' ').trim();
+    if (!normalized) return null;
+    return normalized.slice(0, 255);
+  }
+
+  function isSelectorBlockedTarget(el) {
+    if (!el || !el.matches) return false;
+    return el.matches('input, textarea, select, option, [contenteditable="true"]');
+  }
+
+  function isSensitiveElement(target) {
+    if (!target || !target.closest) return false;
+
+    if (target.closest('input[type="password"], input[type="email"], input[type="tel"], input[type="number"]')) return true;
+    if (target.closest('[autocomplete="cc-number"], [autocomplete="cc-csc"], [autocomplete="cc-exp"], [autocomplete="one-time-code"]')) return true;
+    if (target.closest('[name*="password" i], [name*="pass" i], [name*="card" i], [name*="cvc" i], [name*="cvv" i], [name*="iban" i]')) return true;
+
+    if (target.closest('form[action*="login" i], form[id*="login" i], form[class*="login" i], form[action*="checkout" i], form[action*="pay" i], form[id*="checkout" i], form[class*="checkout" i], form[class*="payment" i]')) {
+      return true;
+    }
+
+    return false;
+  }
+
   function detectSelector(target) {
     if (!target || !target.tagName) return null;
+    if (isSelectorBlockedTarget(target)) return null;
 
     var chunks = [];
     var node = target;
@@ -48,8 +75,7 @@
       depth++;
     }
 
-    var selector = chunks.join(' > ');
-    return selector ? selector.slice(0, 255) : null;
+    return normalizeSelector(chunks.join(' > '));
   }
 
   function shouldTrack() {
@@ -76,6 +102,7 @@
 
   function sendPoint(clientX, clientY, target, eventType) {
     if (!shouldTrack()) return;
+    if (isSensitiveElement(target)) return;
 
     var viewportW = window.innerWidth || document.documentElement.clientWidth || 1;
     var viewportH = window.innerHeight || document.documentElement.clientHeight || 1;
