@@ -287,6 +287,8 @@ function wch_enqueue_admin_assets(string $hook): void
             'defaultPath' => '/',
             'nonce' => wp_create_nonce('wp_rest'),
             'pages' => $page_options,
+            'homeUrl' => esc_url_raw(home_url('/')),
+            'siteUrl' => esc_url_raw(site_url('/')),
         ]
     );
 }
@@ -847,7 +849,6 @@ function wch_render_admin_page(): void
 
         <div class="wch-preview-shell">
             <iframe id="wch-preview" src="about:blank" title="Page preview"></iframe>
-            <div id="wch-heatmap-layer" aria-hidden="true"></div>
             <div id="wch-preview-notice" class="wch-preview-notice" hidden></div>
         </div>
 
