@@ -43,7 +43,13 @@ function wch_rest_route_url(string $route): string
         return esc_url_raw($rest_candidate);
     }
 
-    return esc_url_raw(home_url('/index.php?rest_route=' . rawurlencode($normalized_route)));
+    $fallback_url = add_query_arg(
+        'rest_route',
+        $normalized_route,
+        home_url('/index.php')
+    );
+
+    return esc_url_raw($fallback_url);
 }
 
 /**

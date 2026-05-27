@@ -59,13 +59,24 @@
     }
   }
 
-
-  function buildApiUrl(baseUrl, queryString) {
+  function buildApiUrl(baseUrl, extraParams) {
     if (!baseUrl) return '';
-    if (!queryString) return baseUrl;
 
-    var separator = baseUrl.indexOf('?') === -1 ? '?' : '&';
-    return baseUrl + separator + queryString;
+    var base;
+    try {
+      base = new URL(baseUrl, window.location.origin);
+    } catch (e) {
+      if (!extraParams || !extraParams.toString()) return baseUrl;
+      return baseUrl + (baseUrl.indexOf('?') === -1 ? '?' : '&') + extraParams.toString();
+    }
+
+    if (extraParams && typeof extraParams.forEach === 'function') {
+      extraParams.forEach(function (value, key) {
+        base.searchParams.set(key, value);
+      });
+    }
+
+    return base.toString();
   }
 
   function buildPreviewUrl(path) {
@@ -91,24 +102,9 @@
   function getDocumentSize(doc) {
     var de = doc.documentElement;
     var body = doc.body;
-
-    var width = Math.max(
-      de.scrollWidth || 0,
-      de.clientWidth || 0,
-      body ? body.scrollWidth || 0 : 0,
-      body ? body.clientWidth || 0 : 0
-    );
-
-    var height = Math.max(
-      de.scrollHeight || 0,
-      de.clientHeight || 0,
-      body ? body.scrollHeight || 0 : 0,
-      body ? body.clientHeight || 0 : 0
-    );
-
     return {
-      width: Math.max(1, width),
-      height: Math.max(1, height)
+      width: Math.max(1, Math.max(de.scrollWidth || 0, de.clientWidth || 0, body ? body.scrollWidth || 0 : 0, body ? body.clientWidth || 0 : 0)),
+      height: Math.max(1, Math.max(de.scrollHeight || 0, de.clientHeight || 0, body ? body.scrollHeight || 0 : 0, body ? body.clientHeight || 0 : 0))
     };
   }
 
@@ -120,25 +116,7 @@
     if (!style) {
       style = doc.createElement('style');
       style.id = 'wch-heatmap-style-inside';
-      style.textContent = [
-        '#wch-heatmap-layer-inside {',
-        '  position: absolute;',
-        '  top: 0;',
-        '  left: 0;',
-        '  pointer-events: none;',
-        '  z-index: 2147483647;',
-        '}',
-        '#wch-heatmap-layer-inside .wch-click-dot {',
-        '  position: absolute;',
-        '  width: 8px;',
-        '  height: 8px;',
-        '  margin-left: -4px;',
-        '  margin-top: -4px;',
-        '  border-radius: 50%;',
-        '  background: rgba(215, 25, 28, 0.75);',
-        '  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.8);',
-        '}'
-      ].join('\n');
+      style.textContent = '#wch-heatmap-layer-inside{position:absolute;top:0;left:0;pointer-events:none;z-index:2147483647;}#wch-heatmap-layer-inside .wch-click-dot{position:absolute;width:8px;height:8px;margin-left:-4px;margin-top:-4px;border-radius:50%;background:rgba(215,25,28,.75);box-shadow:0 0 0 1px rgba(255,255,255,.8);}';
       doc.head.appendChild(style);
     }
 
@@ -149,22 +127,13 @@
   }
 
   function clearLayer() {
-    if (heatmapContainer) {
-      heatmapContainer.innerHTML = '';
-    }
-
-    if (heatmapInstance && typeof heatmapInstance.setData === 'function') {
-      heatmapInstance.setData({ max: 1, data: [] });
-    }
+    if (heatmapContainer) heatmapContainer.innerHTML = '';
+    if (heatmapInstance && typeof heatmapInstance.setData === 'function') heatmapInstance.setData({ max: 1, data: [] });
   }
 
   function drawHeatmap(items) {
     var doc = getIframeDocument();
-    if (!doc) {
-      clearLayer();
-      setPreviewNotice('Нельзя получить доступ к iframe.contentDocument (X-Frame-Options/CSP). Карта не отрисована.', 'is-warning');
-      return;
-    }
+    if (!doc) return clearLayer(), setPreviewNotice('Нельзя получить доступ к iframe.contentDocument (X-Frame-Options/CSP). Карта не отрисована.', 'is-warning');
 
     heatmapContainer = ensureOverlay(doc);
     clearLayer();
@@ -174,36 +143,19 @@
     heatmapContainer.style.height = size.height + 'px';
 
     if (!heatmapInstance) {
-      heatmapInstance = window.simpleHeatmap.create({
-        container: heatmapContainer,
-        radius: 36,
-        maxOpacity: 0.75,
-        blur: 0.9
-      });
+      heatmapInstance = window.simpleHeatmap.create({ container: heatmapContainer, radius: 36, maxOpacity: 0.75, blur: 0.9 });
     }
 
     var points = items.map(function (item) {
-      return {
-        x: Math.max(0, Math.min(size.width, item.x_ratio * size.width)),
-        y: Math.max(0, Math.min(size.height, item.y_ratio * size.height)),
-        value: item.weight || 1
-      };
+      return { x: Math.max(0, Math.min(size.width, item.x_ratio * size.width)), y: Math.max(0, Math.min(size.height, item.y_ratio * size.height)), value: item.weight || 1 };
     });
-
-    var max = points.reduce(function (acc, p) {
-      return p.value > acc ? p.value : acc;
-    }, 1);
-
+    var max = points.reduce(function (acc, p) { return p.value > acc ? p.value : acc; }, 1);
     heatmapInstance.setData({ max: max, data: points });
   }
 
   function drawClickPoints(items) {
     var doc = getIframeDocument();
-    if (!doc) {
-      clearLayer();
-      setPreviewNotice('Нельзя получить доступ к iframe.contentDocument (X-Frame-Options/CSP). Точки не отрисованы.', 'is-warning');
-      return;
-    }
+    if (!doc) return clearLayer(), setPreviewNotice('Нельзя получить доступ к iframe.contentDocument (X-Frame-Options/CSP). Точки не отрисованы.', 'is-warning');
 
     heatmapContainer = ensureOverlay(doc);
     clearLayer();
@@ -217,34 +169,23 @@
       dot.className = 'wch-click-dot';
       dot.style.left = Math.max(0, Math.min(size.width, item.x_ratio * size.width)) + 'px';
       dot.style.top = Math.max(0, Math.min(size.height, item.y_ratio * size.height)) + 'px';
-      if (item.target_selector) {
-        dot.title = item.target_selector;
-      }
+      if (item.target_selector) dot.title = item.target_selector;
       heatmapContainer.appendChild(dot);
     });
   }
 
   function renderCurrentData() {
-    if (!currentItems.length) {
-      clearLayer();
-      return;
-    }
-
-    if (currentMode === 'click-points') {
-      drawClickPoints(currentItems);
-    } else {
-      drawHeatmap(currentItems);
-    }
+    if (!currentItems.length) return clearLayer();
+    if (currentMode === 'click-points') drawClickPoints(currentItems); else drawHeatmap(currentItems);
   }
 
   function updateSummary(summary, selectors) {
     totalClicksEl.textContent = String((summary && summary.total_clicks) || 0);
     uniqueBucketsEl.textContent = String((summary && summary.unique_buckets) || 0);
     hotZonesEl.textContent = String((summary && summary.hottest_zones_count) || 0);
-
     topSelectorsList.innerHTML = '';
-    var safeSelectors = Array.isArray(selectors) ? selectors : [];
 
+    var safeSelectors = Array.isArray(selectors) ? selectors : [];
     if (!safeSelectors.length) {
       var emptyLi = document.createElement('li');
       emptyLi.textContent = 'Нет данных';
@@ -265,12 +206,10 @@
     params.set('path', path);
     params.set('mode', modeSelect.value || 'heatmap');
     params.set('min_weight', String(Math.max(1, parseInt(minWeight.value || '1', 10))));
-
     if (deviceType.value && deviceType.value !== 'all') params.set('device_type', deviceType.value);
     if (dateFrom.value) params.set('date_from', dateFrom.value);
     if (dateTo.value) params.set('date_to', dateTo.value);
-
-    return params.toString();
+    return params;
   }
 
   function resetFilters() {
@@ -291,6 +230,7 @@
     var path = normalizePath(pathInput.value);
     pathInput.value = path;
     setPreviewNotice('');
+
     if (iframeLoadTimer) clearTimeout(iframeLoadTimer);
     iframe.src = buildPreviewUrl(path);
     iframeLoadTimer = window.setTimeout(function () {
@@ -300,16 +240,9 @@
     toggleLoading(true);
     setStatus('Загрузка данных…');
 
-    var query = buildQuery(path);
-    var apiUrl = buildApiUrl(window.wchAdmin.heatmapUrl, query);
+    var apiUrl = buildApiUrl(window.wchAdmin.heatmapUrl, buildQuery(path));
 
-    fetch(apiUrl, {
-      method: 'GET',
-      credentials: 'same-origin',
-      headers: {
-        'X-WP-Nonce': window.wchAdmin.nonce || ''
-      }
-    })
+    fetch(apiUrl, { method: 'GET', credentials: 'same-origin', headers: { 'X-WP-Nonce': window.wchAdmin.nonce || '' } })
       .then(function (response) {
         if (!response.ok) throw new Error('HTTP ' + response.status);
         return response.json();
@@ -317,10 +250,8 @@
       .then(function (data) {
         var safeData = data && typeof data === 'object' ? data : {};
         var items = Array.isArray(safeData.items) ? safeData.items : [];
-        var mode = safeData.mode || 'heatmap';
-
         currentItems = items;
-        currentMode = mode;
+        currentMode = safeData.mode || 'heatmap';
 
         if (!items.length) {
           clearLayer();
@@ -332,12 +263,8 @@
 
         updateSummary(safeData.summary || {}, safeData.top_selectors || []);
       })
-      .catch(function (err) {
-        setStatus('Не удалось загрузить данные: ' + err.message, 'is-error');
-      })
-      .finally(function () {
-        toggleLoading(false);
-      });
+      .catch(function (err) { setStatus('Не удалось загрузить данные: ' + err.message, 'is-error'); })
+      .finally(function () { toggleLoading(false); });
   }
 
   (window.wchAdmin.pages || []).forEach(function (item) {
@@ -347,31 +274,15 @@
     pageSelect.appendChild(opt);
   });
 
-  pageSelect.addEventListener('change', function () {
-    if (pageSelect.value) {
-      pathInput.value = pageSelect.value;
-    }
-  });
-
+  pageSelect.addEventListener('change', function () { if (pageSelect.value) pathInput.value = pageSelect.value; });
   loadBtn.addEventListener('click', loadData);
   resetBtn.addEventListener('click', resetFilters);
 
   iframe.addEventListener('load', function () {
     if (iframeLoadTimer) clearTimeout(iframeLoadTimer);
-
     var doc = getIframeDocument();
-    if (!doc) {
-      setPreviewNotice('Предпросмотр недоступен из-за ограничений встраивания (X-Frame-Options/CSP).', 'is-warning');
-      clearLayer();
-      return;
-    }
-
+    if (!doc) return setPreviewNotice('Предпросмотр недоступен из-за ограничений встраивания (X-Frame-Options/CSP).', 'is-warning'), clearLayer();
     setPreviewNotice('');
-
-    doc.addEventListener('scroll', function () {
-      // Overlay is rendered inside the same document and naturally scrolls with content.
-    }, { passive: true });
-
     renderCurrentData();
   });
 })();
