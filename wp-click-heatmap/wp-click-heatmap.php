@@ -33,6 +33,19 @@ function wch_get_options(): array
     ];
 }
 
+
+function wch_rest_route_url(string $route): string
+{
+    $normalized_route = '/' . ltrim(trim($route), '/');
+
+    $rest_candidate = rest_url(ltrim($normalized_route, '/'));
+    if (is_string($rest_candidate) && filter_var($rest_candidate, FILTER_VALIDATE_URL)) {
+        return esc_url_raw($rest_candidate);
+    }
+
+    return esc_url_raw(home_url('/index.php?rest_route=' . rawurlencode($normalized_route)));
+}
+
 /**
  * Create plugin DB table and schedule cleanup.
  */
@@ -218,7 +231,7 @@ function wch_enqueue_frontend_assets(): void
         'wch-tracker',
         'wchTracker',
         [
-            'restUrl' => esc_url_raw(rest_url('wch/v1/click')),
+            'restUrl' => wch_rest_route_url('/wch/v1/click'),
             'nonce'   => wp_create_nonce('wp_rest'),
             'path'    => wch_normalize_path($path),
             'postId'  => is_singular() ? get_the_ID() : null,
@@ -283,7 +296,7 @@ function wch_enqueue_admin_assets(string $hook): void
         'wch-admin',
         'wchAdmin',
         [
-            'heatmapUrl' => esc_url_raw(rest_url('wch/v1/heatmap')),
+            'heatmapUrl' => wch_rest_route_url('/wch/v1/heatmap'),
             'defaultPath' => '/',
             'nonce' => wp_create_nonce('wp_rest'),
             'pages' => $page_options,
