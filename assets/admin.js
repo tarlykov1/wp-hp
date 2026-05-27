@@ -59,6 +59,15 @@
     }
   }
 
+
+  function buildApiUrl(baseUrl, queryString) {
+    if (!baseUrl) return '';
+    if (!queryString) return baseUrl;
+
+    var separator = baseUrl.indexOf('?') === -1 ? '?' : '&';
+    return baseUrl + separator + queryString;
+  }
+
   function buildPreviewUrl(path) {
     var baseUrl = window.wchAdmin.homeUrl || window.wchAdmin.siteUrl || window.location.origin;
 
@@ -291,7 +300,10 @@
     toggleLoading(true);
     setStatus('Загрузка данных…');
 
-    fetch(window.wchAdmin.heatmapUrl + '?' + buildQuery(path), {
+    var query = buildQuery(path);
+    var apiUrl = buildApiUrl(window.wchAdmin.heatmapUrl, query);
+
+    fetch(apiUrl, {
       method: 'GET',
       credentials: 'same-origin',
       headers: {
@@ -303,8 +315,9 @@
         return response.json();
       })
       .then(function (data) {
-        var items = Array.isArray(data.items) ? data.items : [];
-        var mode = data.mode || 'heatmap';
+        var safeData = data && typeof data === 'object' ? data : {};
+        var items = Array.isArray(safeData.items) ? safeData.items : [];
+        var mode = safeData.mode || 'heatmap';
 
         currentItems = items;
         currentMode = mode;
@@ -317,7 +330,7 @@
           setStatus('Загружено точек: ' + items.length, 'is-success');
         }
 
-        updateSummary(data.summary || {}, data.top_selectors || []);
+        updateSummary(safeData.summary || {}, safeData.top_selectors || []);
       })
       .catch(function (err) {
         setStatus('Не удалось загрузить данные: ' + err.message, 'is-error');
