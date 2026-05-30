@@ -868,6 +868,7 @@ function wch_render_admin_page(): void
 
         <div class="wch-preview-shell">
             <iframe id="wch-preview" src="about:blank" title="Page preview"></iframe>
+            <div id="wch-heatmap-layer" aria-hidden="true"></div>
             <div id="wch-preview-notice" class="wch-preview-notice" hidden></div>
         </div>
 
