@@ -129,6 +129,16 @@
     heatmapInstance = null;
   }
 
+  function getHeatmapOptions(size) {
+    var isMobile = deviceType.value === 'mobile' || size.width <= 600;
+
+    return {
+      radius: isMobile ? 18 : 28,
+      maxOpacity: isMobile ? 0.45 : 0.6,
+      blur: 0.85
+    };
+  }
+
   function drawHeatmap(items) {
     if (!layer) return setPreviewNotice('Слой теплокарты #wch-heatmap-layer не найден. Карта не отрисована.', 'is-warning');
 
@@ -143,13 +153,15 @@
       return setPreviewNotice('Библиотека теплокарты не загружена. Карта не отрисована.', 'is-warning');
     }
 
-    heatmapInstance = window.simpleHeatmap.create({ container: heatmapContainer, radius: 48, maxOpacity: 0.95, blur: 0.95 });
+    var heatmapOptions = getHeatmapOptions(size);
+    heatmapOptions.container = heatmapContainer;
+    heatmapInstance = window.simpleHeatmap.create(heatmapOptions);
 
     var points = items.map(function (item) {
       return {
         x: Math.max(0, Math.min(size.width, item.x_ratio * size.width)),
         y: Math.max(0, Math.min(size.height, item.y_ratio * size.height)),
-        value: Math.max(3, item.weight || 1)
+        value: item.weight || 1
       };
     });
     var max = points.reduce(function (acc, p) { return p.value > acc ? p.value : acc; }, 1);
