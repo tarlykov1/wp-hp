@@ -14,6 +14,7 @@
   var resetBtn = document.getElementById('wch-reset');
   var loader = document.getElementById('wch-loader');
   var iframe = document.getElementById('wch-preview');
+  var layer = document.getElementById('wch-heatmap-layer');
   var statusEl = document.getElementById('wch-status');
   var totalClicksEl = document.getElementById('wch-total-clicks');
   var uniqueBucketsEl = document.getElementById('wch-unique-buckets');
@@ -22,7 +23,7 @@
   var previewNotice = document.getElementById('wch-preview-notice');
 
   var heatmapInstance = null;
-  var heatmapContainer = null;
+  var heatmapContainer = layer;
   var iframeLoadTimer = null;
   var currentItems = [];
   var currentMode = 'heatmap';
@@ -99,73 +100,74 @@
     }
   }
 
-  function getDocumentSize(doc) {
-    var de = doc.documentElement;
-    var body = doc.body;
+  function getIframeLayerSize() {
+    if (!iframe) return { width: 1, height: 1 };
+
+    var rect = iframe.getBoundingClientRect();
     return {
-      width: Math.max(1, Math.max(de.scrollWidth || 0, de.clientWidth || 0, body ? body.scrollWidth || 0 : 0, body ? body.clientWidth || 0 : 0)),
-      height: Math.max(1, Math.max(de.scrollHeight || 0, de.clientHeight || 0, body ? body.scrollHeight || 0 : 0, body ? body.clientHeight || 0 : 0))
+      width: Math.max(1, Math.round(rect.width || iframe.clientWidth || iframe.offsetWidth || 1)),
+      height: Math.max(1, Math.round(rect.height || iframe.clientHeight || iframe.offsetHeight || 1))
     };
   }
 
-  function ensureOverlay(doc) {
-    var existing = doc.getElementById('wch-heatmap-layer-inside');
-    if (existing) return existing;
+  function syncLayerToIframe() {
+    if (!layer) return null;
 
-    var style = doc.getElementById('wch-heatmap-style-inside');
-    if (!style) {
-      style = doc.createElement('style');
-      style.id = 'wch-heatmap-style-inside';
-      style.textContent = '#wch-heatmap-layer-inside{position:absolute;top:0;left:0;pointer-events:none;z-index:2147483647;}#wch-heatmap-layer-inside .wch-click-dot{position:absolute;width:8px;height:8px;margin-left:-4px;margin-top:-4px;border-radius:50%;background:rgba(215,25,28,.75);box-shadow:0 0 0 1px rgba(255,255,255,.8);}';
-      doc.head.appendChild(style);
-    }
+    var size = getIframeLayerSize();
+    layer.style.display = 'block';
+    layer.style.width = size.width + 'px';
+    layer.style.height = size.height + 'px';
+    layer.style.top = iframe ? iframe.offsetTop + 'px' : '0';
+    layer.style.left = iframe ? iframe.offsetLeft + 'px' : '0';
 
-    var layer = doc.createElement('div');
-    layer.id = 'wch-heatmap-layer-inside';
-    doc.body.appendChild(layer);
-    return layer;
+    return size;
   }
 
   function clearLayer() {
-    if (heatmapContainer) heatmapContainer.innerHTML = '';
-    if (heatmapInstance && typeof heatmapInstance.setData === 'function') heatmapInstance.setData({ max: 1, data: [] });
+    if (!heatmapContainer) return;
+    heatmapContainer.innerHTML = '';
+    heatmapInstance = null;
   }
 
   function drawHeatmap(items) {
-    var doc = getIframeDocument();
-    if (!doc) return clearLayer(), setPreviewNotice('Нельзя получить доступ к iframe.contentDocument (X-Frame-Options/CSP). Карта не отрисована.', 'is-warning');
+    if (!layer) return setPreviewNotice('Слой теплокарты #wch-heatmap-layer не найден. Карта не отрисована.', 'is-warning');
 
-    heatmapContainer = ensureOverlay(doc);
+    var size = syncLayerToIframe();
+    if (!size) return;
+
+    heatmapContainer = layer;
     clearLayer();
+    layer.style.display = 'block';
 
-    var size = getDocumentSize(doc);
-    heatmapContainer.style.width = size.width + 'px';
-    heatmapContainer.style.height = size.height + 'px';
-
-    if (!heatmapInstance) {
-      heatmapInstance = window.simpleHeatmap.create({ container: heatmapContainer, radius: 36, maxOpacity: 0.75, blur: 0.9 });
+    if (!window.simpleHeatmap || typeof window.simpleHeatmap.create !== 'function') {
+      return setPreviewNotice('Библиотека теплокарты не загружена. Карта не отрисована.', 'is-warning');
     }
 
+    heatmapInstance = window.simpleHeatmap.create({ container: heatmapContainer, radius: 48, maxOpacity: 0.95, blur: 0.95 });
+
     var points = items.map(function (item) {
-      return { x: Math.max(0, Math.min(size.width, item.x_ratio * size.width)), y: Math.max(0, Math.min(size.height, item.y_ratio * size.height)), value: item.weight || 1 };
+      return {
+        x: Math.max(0, Math.min(size.width, item.x_ratio * size.width)),
+        y: Math.max(0, Math.min(size.height, item.y_ratio * size.height)),
+        value: Math.max(3, item.weight || 1)
+      };
     });
     var max = points.reduce(function (acc, p) { return p.value > acc ? p.value : acc; }, 1);
     heatmapInstance.setData({ max: max, data: points });
   }
 
   function drawClickPoints(items) {
-    var doc = getIframeDocument();
-    if (!doc) return clearLayer(), setPreviewNotice('Нельзя получить доступ к iframe.contentDocument (X-Frame-Options/CSP). Точки не отрисованы.', 'is-warning');
+    if (!layer) return setPreviewNotice('Слой теплокарты #wch-heatmap-layer не найден. Точки не отрисованы.', 'is-warning');
 
-    heatmapContainer = ensureOverlay(doc);
+    var size = syncLayerToIframe();
+    if (!size) return;
+
+    heatmapContainer = layer;
     clearLayer();
-
-    var size = getDocumentSize(doc);
-    heatmapContainer.style.width = size.width + 'px';
-    heatmapContainer.style.height = size.height + 'px';
+    layer.style.display = 'block';
 
     items.forEach(function (item) {
-      var dot = doc.createElement('span');
+      var dot = document.createElement('span');
       dot.className = 'wch-click-dot';
       dot.style.left = Math.max(0, Math.min(size.width, item.x_ratio * size.width)) + 'px';
       dot.style.top = Math.max(0, Math.min(size.height, item.y_ratio * size.height)) + 'px';
@@ -176,6 +178,7 @@
 
   function renderCurrentData() {
     if (!currentItems.length) return clearLayer();
+    syncLayerToIframe();
     if (currentMode === 'click-points') drawClickPoints(currentItems); else drawHeatmap(currentItems);
   }
 
@@ -230,6 +233,7 @@
     var path = normalizePath(pathInput.value);
     pathInput.value = path;
     setPreviewNotice('');
+    clearLayer();
 
     if (iframeLoadTimer) clearTimeout(iframeLoadTimer);
     iframe.src = buildPreviewUrl(path);
@@ -277,12 +281,17 @@
   pageSelect.addEventListener('change', function () { if (pageSelect.value) pathInput.value = pageSelect.value; });
   loadBtn.addEventListener('click', loadData);
   resetBtn.addEventListener('click', resetFilters);
+  window.addEventListener('resize', renderCurrentData);
 
   iframe.addEventListener('load', function () {
     if (iframeLoadTimer) clearTimeout(iframeLoadTimer);
-    var doc = getIframeDocument();
-    if (!doc) return setPreviewNotice('Предпросмотр недоступен из-за ограничений встраивания (X-Frame-Options/CSP).', 'is-warning'), clearLayer();
     setPreviewNotice('');
+    syncLayerToIframe();
+
+    if (!getIframeDocument()) {
+      setPreviewNotice('Предпросмотр недоступен из-за ограничений встраивания (X-Frame-Options/CSP), но слой теплокарты отрисован поверх iframe.', 'is-warning');
+    }
+
     renderCurrentData();
   });
 })();
